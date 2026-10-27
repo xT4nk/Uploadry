@@ -1,0 +1,12 @@
+# Build output / large VM artifacts — never commit these
+dist/
+release-thm/
+*.ova
+*.vmdk
+*.qcow2
+*.img
+
+# Local / host-specific
+.DS_Store
+.lima-uploadry.rendered.yaml
+.build/

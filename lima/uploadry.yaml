@@ -1,0 +1,44 @@
+# Lima definition for the "Uploadry" OSCP-style vulnerable target.
+#
+#   limactl start  --name=uploadry ./lima/uploadry.yaml   # build & boot
+#   limactl shell  uploadry                               # root-less shell on the VM
+#   limactl stop   uploadry
+#   limactl delete uploadry
+#
+# The vulnerable web app is reachable from the Mac host at:
+#   http://127.0.0.1:8080
+#
+# This VM is a DELIBERATELY VULNERABLE lab target. Keep it on the
+# loopback/host only. Do not expose it to any untrusted network.
+
+vmType: "vz"                 # Apple Virtualization.framework - native arm64, fast
+os: "Linux"
+arch: "aarch64"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+cpus: 2
+memory: "2GiB"
+disk: "10GiB"
+
+# Mount the repo (this folder's parent) read-only so provision.sh can
+# deploy the web app from /opt/lab.
+mounts:
+  - location: "__LAB_REPO__"   # substituted with the repo path by lab.sh at runtime
+    mountPoint: "/opt/lab"
+    writable: false
+
+# Expose the target web server on the host loopback only.
+portForwards:
+  - guestPort: 80
+    hostIP: "127.0.0.1"
+    hostPort: 8080
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      bash /opt/lab/provision/provision.sh
