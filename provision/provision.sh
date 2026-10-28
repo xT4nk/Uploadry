@@ -58,24 +58,44 @@ chmod 440 /etc/sudoers.d/michael
 # Real flags are injected at build time via the USER_FLAG / ROOT_FLAG env
 # vars; the defaults below are redacted placeholders so the public repo stays
 # spoiler-free. (An empty value also falls back to the placeholder.)
-USER_FLAG="${USER_FLAG:-THM{REDACTED___set_USER_FLAG_at_build}}"
-ROOT_FLAG="${ROOT_FLAG:-THM{REDACTED___set_ROOT_FLAG_at_build}}"
+USER_FLAG="${USER_FLAG:-REDACTED__set_USER_FLAG_env_at_build}"
+ROOT_FLAG="${ROOT_FLAG:-REDACTED__set_ROOT_FLAG_env_at_build}"
 echo "$USER_FLAG" > /home/michael/user.txt
 chown michael:michael /home/michael/user.txt
 chmod 644 /home/michael/user.txt
 echo "$ROOT_FLAG" > /root/root.txt
 chmod 600 /root/root.txt
 
-echo "[*] Allow password SSH login (so michael can be used over SSH too) ..."
-# Ubuntu cloud images disable password auth in
-# /etc/ssh/sshd_config.d/60-cloudimg-settings.conf, and sshd honours the
-# FIRST matching value — so (a) flip any existing drop-in to 'yes', and
-# (b) add an early-sorting 00- drop-in that wins the first-match race.
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+echo "[*] Enable password SSH + root login (for platform maintenance access) ..."
+# Root password for the hosting platform's maintenance SSH (e.g. TryHackMe).
+# Injected at build time via ROOT_PASS; the placeholder default keeps the public
+# repo clean. root over SSH is for maintenance, not part of the intended path.
+ROOT_PASS="${ROOT_PASS:-changeme}"
+echo "root:${ROOT_PASS}" | chpasswd
+
+# Password auth must survive cloud-init's FIRST boot on the target platform: the
+# image is cloud-init-cleaned at build, so cloud-init re-runs there and writes
+# /etc/ssh/sshd_config.d/50-cloud-init.conf from ssh_pwauth — which would set
+# 'PasswordAuthentication no' and lock root. Tell cloud-init not to.
+mkdir -p /etc/cloud/cloud.cfg.d
+cat >/etc/cloud/cloud.cfg.d/99-lab-ssh.cfg <<'EOF'
+ssh_pwauth: true
+disable_root: false
+EOF
+
+# Our own sshd drop-in; '00-' sorts first, so it wins sshd's first-match rule.
 mkdir -p /etc/ssh/sshd_config.d
-find /etc/ssh/sshd_config.d -name '*.conf' -exec sed -i 's/^[#[:space:]]*PasswordAuthentication .*/PasswordAuthentication yes/' {} + 2>/dev/null || true
-printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication no\n' > /etc/ssh/sshd_config.d/00-lab.conf
-rm -f /etc/ssh/sshd_config.d/99-lab.conf
+cat >/etc/ssh/sshd_config.d/00-lab.conf <<'EOF'
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PermitRootLogin yes
+EOF
+
+# Flip any value baked into the main config or the other drop-ins (the Ubuntu
+# cloud image ships 'PasswordAuthentication no').
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+find /etc/ssh/sshd_config.d -name '*.conf' ! -name '00-lab.conf' \
+    -exec sed -i 's/^[#[:space:]]*PasswordAuthentication .*/PasswordAuthentication yes/' {} + 2>/dev/null || true
 systemctl restart ssh || systemctl restart sshd || true
 
 echo "[*] Restarting Apache ..."

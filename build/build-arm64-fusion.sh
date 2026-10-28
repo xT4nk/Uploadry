@@ -44,7 +44,7 @@ cat > build-inside.sh <<'INSIDE'
 mkdir -p /opt/lab
 tar xzf /root/lab.tgz -C /opt/lab
 {
-  if LAB_FUSION=1 USER_FLAG="__USER_FLAG__" ROOT_FLAG="__ROOT_FLAG__" bash /opt/lab/provision/provision.sh; then
+  if LAB_FUSION=1 USER_FLAG="__USER_FLAG__" ROOT_FLAG="__ROOT_FLAG__" ROOT_PASS="__ROOT_PASS__" bash /opt/lab/provision/provision.sh; then
     cloud-init clean --logs || true
     rm -f /root/lab.tgz /root/build-inside.sh
     echo "LAB-BUILD-OK"
@@ -58,7 +58,7 @@ INSIDE
 
 # Bake the real flags (from the host env) into the in-VM build script, or leave
 # them empty so the provisioner uses its redacted placeholders.
-sed -i '' "s|__USER_FLAG__|${USER_FLAG:-}|; s|__ROOT_FLAG__|${ROOT_FLAG:-}|" build-inside.sh
+sed -i '' "s|__USER_FLAG__|${USER_FLAG:-}|; s|__ROOT_FLAG__|${ROOT_FLAG:-}|; s|__ROOT_PASS__|${ROOT_PASS:-}|" build-inside.sh
 
 {
   echo "#cloud-config"
