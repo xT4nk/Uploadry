@@ -55,10 +55,15 @@ EOF
 chmod 440 /etc/sudoers.d/michael
 
 # --- Flags (TryHackMe format, canonical user.txt / root.txt) ---------
-echo "THM{upl0ad_f1lt3r_bypass3d}" > /home/michael/user.txt
+# Real flags are injected at build time via the USER_FLAG / ROOT_FLAG env
+# vars; the defaults below are redacted placeholders so the public repo stays
+# spoiler-free. (An empty value also falls back to the placeholder.)
+USER_FLAG="${USER_FLAG:-THM{REDACTED___set_USER_FLAG_at_build}}"
+ROOT_FLAG="${ROOT_FLAG:-THM{REDACTED___set_ROOT_FLAG_at_build}}"
+echo "$USER_FLAG" > /home/michael/user.txt
 chown michael:michael /home/michael/user.txt
 chmod 644 /home/michael/user.txt
-echo "THM{g7f0b1ns_f1nd_t0_r00t}" > /root/root.txt
+echo "$ROOT_FLAG" > /root/root.txt
 chmod 600 /root/root.txt
 
 echo "[*] Allow password SSH login (so michael can be used over SSH too) ..."
