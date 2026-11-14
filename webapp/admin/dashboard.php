@@ -13,10 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['photo'])) {
     $name = basename($f['name']);
     $ext  = strtolower(pathinfo($name, PATHINFO_EXTENSION));
 
-    // --- "Security" checks (DELIBERATELY WEAK - lab target) ---------------
-    // 1. Trust the client-supplied MIME type.
-    // 2. Blacklist a few obvious extensions, but the list is incomplete
-    //    (misses .phtml, .php3, .php4, .php5, .php7, .pht, .phar ...).
+    // Reject by MIME type (from the client) and by a blacklist of extensions.
     $blacklist   = ['php', 'php2', 'html', 'htm', 'js'];
     $allowedMime = ['image/jpeg', 'image/png', 'image/gif'];
 

@@ -1,5 +1,5 @@
 <?php
-// SnapShare - simple photo gallery (DELIBERATELY VULNERABLE - lab only)
+// SnapShare - simple photo gallery
 ?>
 <!doctype html>
 <html lang="en">
