@@ -3,6 +3,12 @@
 All notable changes to the Uploadry lab are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Security
+- `provision.sh`: without `ROOT_PASS`, root gets no password and `PermitRootLogin no`
+  (before: `root:changeme` over SSH). README explains how to set it.
+
 ## [1.0.0] — 2026-10-28
 
 ### Added

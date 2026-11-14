@@ -68,10 +68,17 @@ chmod 600 /root/root.txt
 
 echo "[*] Enable password SSH + root login (for platform maintenance access) ..."
 # Root password for the hosting platform's maintenance SSH (e.g. TryHackMe).
-# Injected at build time via ROOT_PASS; the placeholder default keeps the public
-# repo clean. root over SSH is for maintenance, not part of the intended path.
-ROOT_PASS="${ROOT_PASS:-changeme}"
-echo "root:${ROOT_PASS}" | chpasswd
+# Injected at build time via ROOT_PASS. root over SSH is for maintenance, not part
+# of the intended path: without ROOT_PASS root keeps no password and cannot log in
+# over SSH (no guessable default such as "changeme").
+if [ -n "${ROOT_PASS:-}" ]; then
+    echo "root:${ROOT_PASS}" | chpasswd
+    ROOT_LOGIN=yes
+else
+    echo "[!] ROOT_PASS not set: root login over SSH stays disabled"
+    passwd -l root >/dev/null
+    ROOT_LOGIN=no
+fi
 
 # Password auth must survive cloud-init's FIRST boot on the target platform: the
 # image is cloud-init-cleaned at build, so cloud-init re-runs there and writes
@@ -85,10 +92,10 @@ EOF
 
 # Our own sshd drop-in; '00-' sorts first, so it wins sshd's first-match rule.
 mkdir -p /etc/ssh/sshd_config.d
-cat >/etc/ssh/sshd_config.d/00-lab.conf <<'EOF'
+cat >/etc/ssh/sshd_config.d/00-lab.conf <<EOF
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
-PermitRootLogin yes
+PermitRootLogin ${ROOT_LOGIN}
 EOF
 
 # Flip any value baked into the main config or the other drop-ins (the Ubuntu
@@ -101,6 +108,70 @@ systemctl restart ssh || systemctl restart sshd || true
 echo "[*] Restarting Apache ..."
 systemctl enable apache2 >/dev/null 2>&1 || true
 systemctl restart apache2
+
+# --- Networking: AWS-native (cloud-init) + a DHCP fallback ---------------
+# THM converts the OVA to an AWS AMI and boots it on EC2, where the *Ec2*
+# cloud-init datasource (169.254.169.254 metadata) configures the primary NIC.
+# So we let cloud-init OWN networking — we do NOT disable it and we do NOT drop
+# the Ec2 datasource — and let it write the correct netplan for whatever the
+# interface is named on the target (eth0 on Xen t2, ens5 on Nitro, etc.).
+# We only make the datasource search order explicit (Ec2 for AWS/THM, NoCloud
+# for local seed-based testing) and remove any leftovers from the previous
+# "network: disabled" experiment.
+mkdir -p /etc/cloud/cloud.cfg.d
+printf 'datasource_list: [ Ec2, NoCloud, None ]\n' > /etc/cloud/cloud.cfg.d/90-datasource.cfg
+rm -f /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+rm -f /etc/netplan/01-net-dhcp.yaml
+
+# Belt-and-suspenders: a boot-time one-shot that only acts if NOTHING else gave
+# the box an IPv4 address (e.g. the datasource didn't configure the NIC). It
+# never fights cloud-init when cloud-init succeeds — it checks first — so it is
+# safe on AWS, VMware and QEMU alike, and it is what makes this build differ
+# from a plain stock-cloud-init image.
+cat >/usr/local/sbin/lab-netfallback.sh <<'EOF'
+#!/bin/bash
+# Give the normal path (cloud-init/netplan/networkd) ~60s to obtain an IP.
+for _ in $(seq 1 20); do
+    ip -4 addr show scope global 2>/dev/null | grep -q 'inet ' && exit 0
+    sleep 3
+done
+# Still no global IPv4 -> re-apply whatever netplan config exists.
+netplan apply 2>/dev/null || true
+sleep 5
+ip -4 addr show scope global 2>/dev/null | grep -q 'inet ' && exit 0
+# Nothing at all -> write a DHCP netplan for the first real ethernet and apply.
+IFACE=$(ls /sys/class/net 2>/dev/null | grep -E '^(en|eth)' | head -1)
+[ -n "$IFACE" ] || exit 0
+cat >/etc/netplan/99-lab-fallback.yaml <<NET
+network:
+  version: 2
+  ethernets:
+    ${IFACE}:
+      dhcp4: true
+      dhcp-identifier: mac
+NET
+chmod 600 /etc/netplan/99-lab-fallback.yaml
+netplan apply 2>/dev/null || true
+command -v dhclient    >/dev/null && dhclient -1 "$IFACE"        2>/dev/null || true
+command -v networkctl  >/dev/null && networkctl reconfigure "$IFACE" 2>/dev/null || true
+EOF
+chmod +x /usr/local/sbin/lab-netfallback.sh
+
+cat >/etc/systemd/system/lab-netfallback.service <<'EOF'
+[Unit]
+Description=Lab fallback DHCP if no IPv4 after boot
+After=network-online.target cloud-init.service systemd-networkd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-netfallback.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable lab-netfallback.service >/dev/null 2>&1 || true
 
 # --- VMware Fusion integration + EFI boot fallback -------------------
 # open-vm-tools: guest integration + lets `vmrun getGuestIPAddress` work.
@@ -124,22 +195,7 @@ if [ "${LAB_FUSION:-0}" = "1" ]; then
     sed -i 's#^GRUB_CMDLINE_LINUX_DEFAULT=.*#GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200 console=tty0"#' /etc/default/grub
     update-grub >/dev/null 2>&1 || true
     systemctl enable getty@tty1 >/dev/null 2>&1 || true
-
-    # Deterministic DHCP on whatever the NIC is named (vmxnet3 -> ens*),
-    # independent of cloud-init's datasource detection under VMware.
-    echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
-    cat > /etc/netplan/01-fusion-dhcp.yaml <<'NETPLAN'
-network:
-  version: 2
-  ethernets:
-    alleth:
-      match:
-        name: "e*"
-      dhcp4: true
-      dhcp-identifier: mac
-NETPLAN
-    chmod 600 /etc/netplan/01-fusion-dhcp.yaml
-    netplan generate >/dev/null 2>&1 || true
+    # (networking is handled by cloud-init + the fallback one-shot above)
 fi
 
 # Record the exact PHP version (used for the room's fingerprinting task

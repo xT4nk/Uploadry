@@ -68,6 +68,14 @@ identical in behaviour.
 > ```
 > Without them the provisioner just writes the placeholders.
 
+> **Root over SSH.** Only for the hosting platform's maintenance (e.g. TryHackMe), and
+> only if you set `ROOT_PASS` at build time:
+> ```bash
+> ROOT_PASS='a-long-random-password' ./build/build-x86-ova.sh
+> ```
+> Without it, root has no password and cannot log in over SSH. Either way, keep the
+> VM on an isolated network: it is vulnerable on purpose.
+
 ---
 
 ## Requirements
