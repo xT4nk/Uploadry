@@ -18,6 +18,7 @@ echo "[*] Deploying the SnapShare web app ..."
 rm -rf "$DOCROOT"
 mkdir -p "$DOCROOT"
 cp -r "$LAB_SRC/." "$DOCROOT/"
+find "$DOCROOT" \( -name '.DS_Store' -o -name '._*' \) -delete    # strip macOS cruft the build tar may add
 
 # --- Info-disclosure: leftover source backup served as plain text -----
 # (Apache serves .bak as text/plain, leaking the admin credentials.)
@@ -62,7 +63,8 @@ USER_FLAG="${USER_FLAG:-REDACTED__set_USER_FLAG_env_at_build}"
 ROOT_FLAG="${ROOT_FLAG:-REDACTED__set_ROOT_FLAG_env_at_build}"
 echo "$USER_FLAG" > /home/michael/user.txt
 chown michael:michael /home/michael/user.txt
-chmod 644 /home/michael/user.txt
+chmod 750 /home/michael          # www-data must not read user.txt before becoming michael
+chmod 640 /home/michael/user.txt
 echo "$ROOT_FLAG" > /root/root.txt
 chmod 600 /root/root.txt
 
