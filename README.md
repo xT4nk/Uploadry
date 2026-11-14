@@ -131,7 +131,7 @@ For a setup where the target has its own IP and you attack from a
 ## Files
 
 ```
-oscp-lab/
+Uploadry/
 ├── lab.sh                   # up / down / reset / shell helper (Lima)
 ├── lima/uploadry.yaml       # the Lima VM definition (arm64)
 ├── provision/provision.sh   # builds the target (shared by every build path)
