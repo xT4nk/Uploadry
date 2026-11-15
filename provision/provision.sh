@@ -132,18 +132,35 @@ rm -f /etc/netplan/01-net-dhcp.yaml
 # from a plain stock-cloud-init image.
 cat >/usr/local/sbin/lab-netfallback.sh <<'EOF'
 #!/bin/bash
+# Fallback DHCP + boot network diagnostics. Every line is mirrored to the serial
+# console (/dev/ttyS0) when present, so the hosting platform's instance system
+# log (AWS/EC2 — what TryHackMe can pull) shows the network story even when the
+# box is unreachable over IP. Harmless locally (no writable ttyS0 -> journal only).
+SER=/dev/ttyS0
+log(){ echo "lab-net: $*"; [ -w "$SER" ] && echo "lab-net: $*" > "$SER" 2>/dev/null || true; }
+log "boot diag $(date -u 2>/dev/null)"
+log "cloud-init: $(cloud-init status 2>/dev/null | tr '\n' ' ')"
+log "ifaces: $(ls /sys/class/net 2>/dev/null | tr '\n' ' ')"
 # Give the normal path (cloud-init/netplan/networkd) ~60s to obtain an IP.
 for _ in $(seq 1 20); do
-    ip -4 addr show scope global 2>/dev/null | grep -q 'inet ' && exit 0
+    if ip -4 addr show scope global 2>/dev/null | grep -q 'inet '; then
+        log "have global IPv4: $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2,$4}' | tr '\n' ' ')"
+        exit 0
+    fi
     sleep 3
 done
 # Still no global IPv4 -> re-apply whatever netplan config exists.
+log "no global IPv4 after 60s -> re-applying netplan"
 netplan apply 2>/dev/null || true
 sleep 5
-ip -4 addr show scope global 2>/dev/null | grep -q 'inet ' && exit 0
+if ip -4 addr show scope global 2>/dev/null | grep -q 'inet '; then
+    log "global IPv4 after netplan apply: $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2,$4}' | tr '\n' ' ')"
+    exit 0
+fi
 # Nothing at all -> write a DHCP netplan for the first real ethernet and apply.
 IFACE=$(ls /sys/class/net 2>/dev/null | grep -E '^(en|eth)' | head -1)
-[ -n "$IFACE" ] || exit 0
+[ -n "$IFACE" ] || { log "no ethernet iface found"; exit 0; }
+log "forcing DHCP on $IFACE"
 cat >/etc/netplan/99-lab-fallback.yaml <<NET
 network:
   version: 2
@@ -156,14 +173,18 @@ chmod 600 /etc/netplan/99-lab-fallback.yaml
 netplan apply 2>/dev/null || true
 command -v dhclient    >/dev/null && dhclient -1 "$IFACE"        2>/dev/null || true
 command -v networkctl  >/dev/null && networkctl reconfigure "$IFACE" 2>/dev/null || true
+log "final: $(ip -4 -o addr show 2>/dev/null | awk '{print $2,$4}' | tr '\n' ' ')"
 EOF
 chmod +x /usr/local/sbin/lab-netfallback.sh
 
 cat >/etc/systemd/system/lab-netfallback.service <<'EOF'
 [Unit]
-Description=Lab fallback DHCP if no IPv4 after boot
-After=network-online.target cloud-init.service systemd-networkd.service
-Wants=network-online.target
+Description=Lab fallback DHCP + boot network diagnostics
+# Deliberately NOT ordered After/Wants network-online.target: this unit's whole
+# job is to rescue the "network never came up" case, and gating it on
+# network-online would mean it never runs in exactly that case. It runs after
+# cloud-init and networkd have *tried*, then polls for an IP on its own.
+After=cloud-init.service systemd-networkd.service
 
 [Service]
 Type=oneshot
@@ -188,17 +209,16 @@ if [ -f /boot/efi/EFI/ubuntu/shimaa64.efi ]; then
     cp -f /boot/efi/EFI/ubuntu/grubaa64.efi /boot/efi/EFI/BOOT/grubaa64.efi 2>/dev/null || true
 fi
 
-# --- Fusion-only tweaks (console visibility + reliable DHCP) ---------
-# Gated on LAB_FUSION=1 so the x86/THM (AWS) image is left untouched.
-if [ "${LAB_FUSION:-0}" = "1" ]; then
-    # Show the boot + a login prompt on VMware's graphical console, not
-    # only on the serial line (otherwise the screen freezes at
-    # "Exiting boot services" even though the kernel is booting).
-    sed -i 's#^GRUB_CMDLINE_LINUX_DEFAULT=.*#GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200 console=tty0"#' /etc/default/grub
-    update-grub >/dev/null 2>&1 || true
-    systemctl enable getty@tty1 >/dev/null 2>&1 || true
-    # (networking is handled by cloud-init + the fallback one-shot above)
-fi
+# --- Serial console on EVERY build (console / system-log visibility) ---
+# AWS/EC2 — and therefore TryHackMe — read the guest's *serial* console (ttyS0)
+# for the instance system log. Without ttyS0 on the kernel cmdline that log is
+# blank and the lab-netfallback boot diagnostics above reach no one who could
+# read them. tty0 stays too, so VMware's graphical console still shows the boot
+# (and doesn't freeze at "Exiting boot services"). Previously LAB_FUSION-gated,
+# which is exactly why the x86/AWS image was undiagnosable.
+sed -i 's#^GRUB_CMDLINE_LINUX_DEFAULT=.*#GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200 console=tty0"#' /etc/default/grub
+update-grub >/dev/null 2>&1 || true
+systemctl enable getty@tty1 >/dev/null 2>&1 || true
 
 # Record the exact PHP version (used for the room's fingerprinting task
 # and the submission write-up). Printed to the console/serial log.

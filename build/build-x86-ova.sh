@@ -46,6 +46,11 @@ tar xzf /root/lab.tgz -C /opt/lab
     # provision.sh already writes /home/michael/user.txt and /root/root.txt
     # clean cloud-init so the image boots fresh on the target platform
     cloud-init clean --logs || true
+    # Unique identity per deployed instance (one AMI -> many VMs): empty the
+    # machine-id so systemd regenerates it on first boot, avoiding a shared DHCP
+    # DUID / identity across every deployed copy. Drop any legacy persistent-net
+    # udev rule too, so the NIC is never pinned to a build-time name on AWS.
+    : > /etc/machine-id; rm -f /var/lib/dbus/machine-id /etc/udev/rules.d/70-persistent-net.rules 2>/dev/null || true
     rm -f /root/lab.tgz /root/build-inside.sh
     echo "LAB-BUILD-OK"
   else
